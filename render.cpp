@@ -1,6 +1,9 @@
 #include <Bela.h>
 #include <libraries/Trill/Trill.h>
 #include <libraries/Gui/Gui.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 #include <vector>
 #include <string>
 #include <fstream>
@@ -13,10 +16,17 @@
 #define LOGGING_INTERVAL 5000 // in microseconds
 #define LOGGING_FREQUENCY 200 // in hz
 
+#define UDP_PORT 5700
+#define RECEIVER_IP "192.168.178.179"
+
 Trill touchSensor;
 Gui gui;
 
 std::ofstream file;
+
+int sock;
+struct sockaddr_in serverAddr;
+const char *hello = "Hello from client";
 
 unsigned int gLogIntervalFrames = 0;
 
@@ -100,6 +110,7 @@ void writeLog(void *)
     	// Write all accumulated values to buffer each second
         writeBufferToCSV();
         dataBuffer.clear();
+        sendto(sock, (const char *)hello, strlen(hello), 0, (struct sockaddr *) &serverAddr, sizeof(serverAddr));
         usleep(1000000);
     }
 }
@@ -157,6 +168,18 @@ bool setup(BelaContext *context, void *userData)
     gLogIntervalFrames = context->audioSampleRate / LOGGING_FREQUENCY;
     
     std::cout << "audioSampleRate: " << context->audioSampleRate << ", audioFrames: " << context->audioFrames << std::endl;
+    
+    // Create UDP socket
+    sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) {
+        rt_printf("Error creating UDP socket\n");
+        return false;
+    }
+
+    // Configure server address
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(UDP_PORT);
+    inet_pton(AF_INET, RECEIVER_IP, &serverAddr.sin_addr);
 
     return true;
 }
