@@ -26,7 +26,7 @@ std::ofstream file;
 
 int sock;
 struct sockaddr_in serverAddr;
-const char *hello = "Hello from client";
+const char *hello = "{\"hello\": \"Hello from bela!\"}";
 
 unsigned int gLogIntervalFrames = 0;
 
@@ -110,7 +110,9 @@ void writeLog(void *)
     	// Write all accumulated values to buffer each second
         writeBufferToCSV();
         dataBuffer.clear();
+        
         sendto(sock, (const char *)hello, strlen(hello), 0, (struct sockaddr *) &serverAddr, sizeof(serverAddr));
+        
         usleep(1000000);
     }
 }
