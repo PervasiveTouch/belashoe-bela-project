@@ -13,10 +13,9 @@
 
 #define NUM_CAP_CHANNELS 8
 #define BUFFER_SIZE 500
-#define LOGGING_INTERVAL 5000 // in microseconds
-#define LOGGING_FREQUENCY 200 // in hz
+#define LOGGING_FREQUENCY 150 // in hz
 
-#define UDP_PORT 5700
+#define UDP_PORT 5701
 #define RECEIVER_IP "192.168.178.179"
 
 Trill touchSensor;
@@ -109,10 +108,23 @@ void writeLog(void *)
     {
     	// Write all accumulated values to buffer each second
         writeBufferToCSV();
+        
+        if (!dataBuffer.empty())
+        {
+            const LogEntry &latestEntry = dataBuffer.back();
+            std::string message = "{\"touch-sensors\":[";
+            for (unsigned int i = 0; i < NUM_CAP_CHANNELS; i++)
+            {
+            message += std::to_string(latestEntry.gSensorReading[i]);
+            if (i < NUM_CAP_CHANNELS - 1)
+                message += ",";
+            }
+	        message += "]}";
+        	sendto(sock, message.c_str(), message.size(), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
+        	std::cout << "Sensor data sent: " << message << std::endl;
+        }
+        
         dataBuffer.clear();
-        
-        sendto(sock, (const char *)hello, strlen(hello), 0, (struct sockaddr *) &serverAddr, sizeof(serverAddr));
-        
         usleep(1000000);
     }
 }
@@ -157,7 +169,7 @@ bool setup(BelaContext *context, void *userData)
 
 	// Start all auxiliary task loops
     Bela_runAuxiliaryTask(readFromSensor);
-    Bela_runAuxiliaryTask(writeLog);
+    // Bela_runAuxiliaryTask(writeLog);
     Bela_runAuxiliaryTask(sendToGui);
 
     // push initial calibration to buffer
@@ -182,6 +194,7 @@ bool setup(BelaContext *context, void *userData)
     serverAddr.sin_family = AF_INET;
     serverAddr.sin_port = htons(UDP_PORT);
     inet_pton(AF_INET, RECEIVER_IP, &serverAddr.sin_addr);
+    std::cout << "Using server address: " << RECEIVER_IP << ":" << UDP_PORT << std::endl;
 
     return true;
 }
@@ -196,7 +209,17 @@ void render(BelaContext *context, void *userData)
     	// If enough frames have passed, log the values
         if (count >= gLogIntervalFrames)
         {
-            logTouchInputToBuffer(touchSensor.rawData);
+            //logTouchInputToBuffer(touchSensor.rawData);
+            
+            std::string message = "{\"touch-sensors\":[";
+            for (unsigned int i = 0; i < NUM_CAP_CHANNELS; i++)
+            {
+	            message += std::to_string(touchSensor.rawData[i]);
+	            if (i < NUM_CAP_CHANNELS - 1)
+	                message += ",";
+            }
+	        message += "]}";
+        	sendto(sock, message.c_str(), message.size(), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
             count = 0;
         }
         count++;
