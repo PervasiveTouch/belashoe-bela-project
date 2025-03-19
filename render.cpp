@@ -16,7 +16,7 @@
 #define LOGGING_FREQUENCY 150 // in hz
 
 #define UDP_PORT 5701
-#define RECEIVER_IP "192.168.178.179"
+#define RECEIVER_IP "192.168.2.228"
 
 Trill touchSensor;
 Gui gui;
@@ -204,6 +204,7 @@ void render(BelaContext *context, void *userData)
     static unsigned int count = 0;
 
 	// Iterate over all frames in the render call
+	// TODO: Anstatt zu zählen die Anzahl der vergangenen Frames seit 1. Renderaufruf durch die audio sample rate teilen und so die time elapsed rausfinden -> Am besten time elapsed seit letzem mal prüfen anstatt ganz vom Anfang
     for (unsigned int i = 0; i < context->audioFrames; i++)
     {
     	// If enough frames have passed, log the values
@@ -219,6 +220,8 @@ void render(BelaContext *context, void *userData)
 	                message += ",";
             }
 	        message += "]}";
+	        // TODO: Timestamp mitschicken, aber nicht von int->string sondern in binär
+	        // TODO: Hier nur in eine Warteschlange schreiben und dann in einem seperatem Thread per UDP schicken
         	sendto(sock, message.c_str(), message.size(), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
             count = 0;
         }
