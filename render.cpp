@@ -10,125 +10,63 @@
 #include <iostream>
 
 #include "circularbuffer.h"
+#include "tsqueue.h"
 
 #define NUM_CAP_CHANNELS 8
 #define BUFFER_SIZE 500
-#define LOGGING_FREQUENCY 150 // in hz
-
 #define UDP_PORT 5701
-#define RECEIVER_IP "192.168.2.228"
+#define RECEIVER_IP "192.168.178.179"
 
 Trill touchSensor;
 Gui gui;
 
 std::ofstream file;
 
+// UDP socket variables
 int sock;
 struct sockaddr_in serverAddr;
-const char *hello = "{\"hello\": \"Hello from bela!\"}";
 
-unsigned int gLogIntervalFrames = 0;
+// Time peroiods
+unsigned int gTaskSleepTime = 1400;	// (in usec) -> according to scan time at normal speed and 13 bits
+float gTimePeriod = 0.1;			// (in seconds) after which data will be sent to the GUI
 
-// Sleep time for auxiliary task in microseconds-> according to the scan time at normal speed and 13 bits
-unsigned int gTaskSleepTime = 1400;
-// Time period (in seconds) after which data will be sent to the GUI
-float gTimePeriod = 0.1;
-
-// Initial calibration and circular buffer for calculating max value of each sensor over time
-float initialCalibration[8] = {0.04, 0.04, 0.05, 0.06, 0.07, 0.06, 0.05, 0.06};
-CircularBuffer sensorBuffers[NUM_CAP_CHANNELS] = {
-    CircularBuffer(BUFFER_SIZE), CircularBuffer(BUFFER_SIZE), CircularBuffer(BUFFER_SIZE), CircularBuffer(BUFFER_SIZE),
-    CircularBuffer(BUFFER_SIZE), CircularBuffer(BUFFER_SIZE), CircularBuffer(BUFFER_SIZE), CircularBuffer(BUFFER_SIZE)};
-
-// Buffer for sensor readings
+// Queue for sensor readings
 struct LogEntry
 {
     float gSensorReading[NUM_CAP_CHANNELS] = {0.0};
 };
-std::vector<LogEntry> dataBuffer;
+TSQueue<LogEntry> gSensorQueue;
 
-void writeBufferToCSV()
-{
-    if (!file.is_open())
-    {
-        const std::string filename = "data.csv";
-        file.open(filename, std::ios::app); // Open file in append mode
-        if (!file.is_open())
-        {
-            std::cerr << "Unable to open file: " << filename << std::endl;
-            return;
-        }
-    }
+// Initial calibration and circular buffer for calculating max value of each sensor over time
+float initialCalibration[NUM_CAP_CHANNELS] = {0.04, 0.04, 0.05, 0.06, 0.07, 0.06, 0.05, 0.06};
+CircularBuffer sensorBuffers[NUM_CAP_CHANNELS] = {
+    CircularBuffer(BUFFER_SIZE), CircularBuffer(BUFFER_SIZE), CircularBuffer(BUFFER_SIZE), CircularBuffer(BUFFER_SIZE),
+    CircularBuffer(BUFFER_SIZE), CircularBuffer(BUFFER_SIZE), CircularBuffer(BUFFER_SIZE), CircularBuffer(BUFFER_SIZE)};
 
-    for (const auto &entry : dataBuffer)
-    {
-        for (float value : entry.gSensorReading)
-        {
-            file << "," << value;
-        }
-        file << "\n";
-    }
 
-    file.close();
-    
-    std::cout << "Saved " << dataBuffer.size() << " entries" << std::endl;
-}
-
-void logTouchInputToBuffer(std::vector<float> input)
+void pushSensorsToQueue(std::vector<float> input)
 {
     LogEntry currentReading;
 
     for (unsigned int i = 0; i < NUM_CAP_CHANNELS; i++)
         currentReading.gSensorReading[i] = input[i];
-
-    dataBuffer.push_back(currentReading);
+        
+    gSensorQueue.push(currentReading);
 }
 
-void closeCSVFile()
-{
-    if (file.is_open())
-    {
-        file.close();
-    }
-}
-
+// Read raw data from sensor in specified intervals
 void readFromSensor(void *)
 {
     while (!Bela_stopRequested())
     {
-        // Read raw data from sensor in specified intervals
         touchSensor.readI2C();
         usleep(gTaskSleepTime);
     }
 }
 
-void writeLog(void *)
-{
-    while (!Bela_stopRequested())
-    {
-    	// Write all accumulated values to buffer each second
-        writeBufferToCSV();
-        
-        if (!dataBuffer.empty())
-        {
-            const LogEntry &latestEntry = dataBuffer.back();
-            std::string message = "{\"touch-sensors\":[";
-            for (unsigned int i = 0; i < NUM_CAP_CHANNELS; i++)
-            {
-            message += std::to_string(latestEntry.gSensorReading[i]);
-            if (i < NUM_CAP_CHANNELS - 1)
-                message += ",";
-            }
-	        message += "]}";
-        	sendto(sock, message.c_str(), message.size(), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
-        	std::cout << "Sensor data sent: " << message << std::endl;
-        }
-        
-        dataBuffer.clear();
-        usleep(1000000);
-    }
-}
-
+/* Function for sending raw sensor data and updated max values for each sensor to gui. 
+ *	Calling frequency is defined by the interval given in gTimePeriod (in seconds).
+ */
 void sendToGui(void *)
 {
     while (!Bela_stopRequested())
@@ -151,6 +89,34 @@ void sendToGui(void *)
     }
 }
 
+/* Function for sending all entries accumulated in the sensor queue to the UDP socket defined in setup(). 
+ *	If all entries are sent, the function sleeps for a short time before retrying, if the queue is not empty.
+ */
+void sendSensorQueue(void *)
+{
+	unsigned int counter = 0;
+	while(!Bela_stopRequested())
+	{
+		while (!gSensorQueue.empty()) 
+		{
+			counter += 1;
+	        LogEntry entry = gSensorQueue.pop();
+	        std::string message = "{\"touch-sensors\":[";
+            for (unsigned int i = 0; i < NUM_CAP_CHANNELS; i++)
+            {
+	            message += std::to_string(entry.gSensorReading[i]);
+	            if (i < NUM_CAP_CHANNELS - 1)
+	                message += ",";
+            }
+	        message += "]}";
+	        sendto(sock, message.c_str(), message.size(), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
+		}
+		usleep(100000);
+		std::cout << "num popped from queue: " << counter << std::endl;
+		counter = 0;
+	}
+}
+
 bool setup(BelaContext *context, void *userData)
 {
     // Setup a Trill Craft on i2c bus 1, using the default address.
@@ -160,7 +126,6 @@ bool setup(BelaContext *context, void *userData)
         return false;
     }
     touchSensor.printDetails();
-
     touchSensor.setMode(Trill::DIFF);
     touchSensor.setScanSettings(2, 13); // 2 = normal update speed, 13 bit resolution -> 1400us scan time
     touchSensor.setPrescaler(3);
@@ -169,17 +134,14 @@ bool setup(BelaContext *context, void *userData)
 
 	// Start all auxiliary task loops
     Bela_runAuxiliaryTask(readFromSensor);
-    // Bela_runAuxiliaryTask(writeLog);
     Bela_runAuxiliaryTask(sendToGui);
+    Bela_runAuxiliaryTask(sendSensorQueue);
 
     // push initial calibration to buffer
     for (int i = 0; i < NUM_CAP_CHANNELS; i++)
     {
         sensorBuffers[i].push_back(initialCalibration[i]);
     }
-
-	// Calculate how many frames it takes to achieve the specified logging frequency
-    gLogIntervalFrames = context->audioSampleRate / LOGGING_FREQUENCY;
     
     std::cout << "audioSampleRate: " << context->audioSampleRate << ", audioFrames: " << context->audioFrames << std::endl;
     
@@ -199,37 +161,16 @@ bool setup(BelaContext *context, void *userData)
     return true;
 }
 
+/* Render function that is called audioSampleRate/audioFrames times per second.
+ *	Verify that  block size is set to 256 frames in order to achieve a calling frequency of ~172hz.
+ */
 void render(BelaContext *context, void *userData)
 {
-    static unsigned int count = 0;
-
-	// Iterate over all frames in the render call
-	// TODO: Anstatt zu zählen die Anzahl der vergangenen Frames seit 1. Renderaufruf durch die audio sample rate teilen und so die time elapsed rausfinden -> Am besten time elapsed seit letzem mal prüfen anstatt ganz vom Anfang
-    for (unsigned int i = 0; i < context->audioFrames; i++)
-    {
-    	// If enough frames have passed, log the values
-        if (count >= gLogIntervalFrames)
-        {
-            //logTouchInputToBuffer(touchSensor.rawData);
-            
-            std::string message = "{\"touch-sensors\":[";
-            for (unsigned int i = 0; i < NUM_CAP_CHANNELS; i++)
-            {
-	            message += std::to_string(touchSensor.rawData[i]);
-	            if (i < NUM_CAP_CHANNELS - 1)
-	                message += ",";
-            }
-	        message += "]}";
-	        // TODO: Timestamp mitschicken, aber nicht von int->string sondern in binär
-	        // TODO: Hier nur in eine Warteschlange schreiben und dann in einem seperatem Thread per UDP schicken
-        	sendto(sock, message.c_str(), message.size(), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
-            count = 0;
-        }
-        count++;
-    }
+	// TODO: Timestamp mitschicken, aber nicht von int->string
+	pushSensorsToQueue(touchSensor.rawData);
 }
 
 void cleanup(BelaContext *context, void *userData)
 {
-    closeCSVFile();
+
 }
