@@ -33,6 +33,7 @@ float gTimePeriod = 0.1;			// (in seconds) after which data will be sent to the 
 // Queue for sensor readings
 struct LogEntry
 {
+	unsigned int timestamp;
     float gSensorReading[NUM_CAP_CHANNELS] = {0.0};
 };
 TSQueue<LogEntry> gSensorQueue;
@@ -44,9 +45,10 @@ CircularBuffer sensorBuffers[NUM_CAP_CHANNELS] = {
     CircularBuffer(BUFFER_SIZE), CircularBuffer(BUFFER_SIZE), CircularBuffer(BUFFER_SIZE), CircularBuffer(BUFFER_SIZE)};
 
 
-void pushSensorsToQueue(std::vector<float> input)
+void pushSensorsToQueue(std::vector<float> input, unsigned int timestamp)
 {
     LogEntry currentReading;
+    currentReading.timestamp = timestamp;
 
     for (unsigned int i = 0; i < NUM_CAP_CHANNELS; i++)
         currentReading.gSensorReading[i] = input[i];
@@ -102,6 +104,7 @@ void sendSensorQueue(void *)
 			counter += 1;
 	        LogEntry entry = gSensorQueue.pop();
 	        std::string message = "{\"touch-sensors\":[";
+	        message += to_string(entry.timestamp) + ",";
             for (unsigned int i = 0; i < NUM_CAP_CHANNELS; i++)
             {
 	            message += std::to_string(entry.gSensorReading[i]);
@@ -111,7 +114,7 @@ void sendSensorQueue(void *)
 	        message += "]}";
 	        sendto(sock, message.c_str(), message.size(), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
 		}
-		usleep(100000);
+		usleep(1000000);
 		std::cout << "num popped from queue: " << counter << std::endl;
 		counter = 0;
 	}
@@ -166,8 +169,10 @@ bool setup(BelaContext *context, void *userData)
  */
 void render(BelaContext *context, void *userData)
 {
+	static unsigned int time = 0;
 	// TODO: Timestamp mitschicken, aber nicht von int->string
-	pushSensorsToQueue(touchSensor.rawData);
+	pushSensorsToQueue(touchSensor.rawData, time);
+	time += 1;
 }
 
 void cleanup(BelaContext *context, void *userData)
