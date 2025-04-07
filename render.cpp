@@ -64,7 +64,7 @@ void sendSensorQueue(void *)
         {
             LogEntry entry = gSensorQueue.pop();
             std::string message = "{\"shoe_data\":[";
-            message += to_string(entry.timestamp) + ",";
+            message += std::to_string(entry.timestamp) + ",";
             for (unsigned int i = 0; i < NUM_CAP_CHANNELS; i++)
             {
                 message += std::to_string(entry.gSensorReading[i]);
@@ -87,17 +87,16 @@ bool setup(BelaContext *context, void *userData)
         return false;
     }
     touchSensor.printDetails();
-    touchSensor.setMode(Trill::DIFF);
+    touchSensor.setMode(Trill::RAW);
     touchSensor.setScanSettings(2, 13); // 2 = normal update speed, 13 bit resolution -> 1400us scan time
     touchSensor.setPrescaler(3);
-
-    gui.setup(context->projectName);
 
     // Start all auxiliary task loops
     Bela_runAuxiliaryTask(readFromSensor);
     Bela_runAuxiliaryTask(sendSensorQueue);
 
     std::cout << "audioSampleRate: " << context->audioSampleRate << ", audioFrames: " << context->audioFrames << std::endl;
+    std::cout << "Logging rate: " << context->audioSampleRate/context->audioFrames << "hz" << std::endl;
 
     // Create UDP socket
     sock = socket(AF_INET, SOCK_DGRAM, 0);
