@@ -14,7 +14,7 @@
 
 #define NUM_CAP_CHANNELS 8
 #define BUFFER_SIZE 500
-#define UDP_PORT 5701
+#define UDP_PORT 5700
 #define RECEIVER_IP "192.168.178.179"
 
 Trill touchSensor;
@@ -96,14 +96,12 @@ void sendToGui(void *)
  */
 void sendSensorQueue(void *)
 {
-	unsigned int counter = 0;
 	while(!Bela_stopRequested())
 	{
 		while (!gSensorQueue.empty()) 
 		{
-			counter += 1;
 	        LogEntry entry = gSensorQueue.pop();
-	        std::string message = "{\"touch-sensors\":[";
+	        std::string message = "{\"shoe_data\":[";
 	        message += to_string(entry.timestamp) + ",";
             for (unsigned int i = 0; i < NUM_CAP_CHANNELS; i++)
             {
@@ -114,9 +112,7 @@ void sendSensorQueue(void *)
 	        message += "]}";
 	        sendto(sock, message.c_str(), message.size(), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
 		}
-		usleep(1000000);
-		std::cout << "num popped from queue: " << counter << std::endl;
-		counter = 0;
+		usleep(100000);
 	}
 }
 
@@ -170,7 +166,6 @@ bool setup(BelaContext *context, void *userData)
 void render(BelaContext *context, void *userData)
 {
 	static unsigned int time = 0;
-	// TODO: Timestamp mitschicken, aber nicht von int->string
 	pushSensorsToQueue(touchSensor.rawData, time);
 	time += 1;
 }
