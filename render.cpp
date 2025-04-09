@@ -7,6 +7,7 @@
 #include <string>
 #include <fstream>
 #include <iostream>
+#include <mutex>
 
 #include "tsqueue.h"
 
@@ -15,6 +16,7 @@
 #define RECEIVER_IP "192.168.178.179"
 
 Trill touchSensor;
+std::mutex gTouchSensorMutex;
 
 // UDP socket variables
 int sock;
@@ -30,9 +32,10 @@ struct LogEntry
     float gSensorReading[NUM_CAP_CHANNELS] = {0.0};
 };
 TSQueue<LogEntry> gSensorQueue;
+TSQueue<LogEntry> gBaselineQueue;
 
-// Add an entry to the thread safe queue
-void pushSensorsToQueue(std::vector<float> input, unsigned int timestamp)
+// Add an entry to a thread safe queue
+void pushSensorsToQueue(TSQueue<LogEntry>& queue ,std::vector<float> input, unsigned int timestamp)
 {
     LogEntry currentReading;
     currentReading.timestamp = timestamp;
@@ -40,7 +43,7 @@ void pushSensorsToQueue(std::vector<float> input, unsigned int timestamp)
     for (unsigned int i = 0; i < NUM_CAP_CHANNELS; i++)
         currentReading.gSensorReading[i] = input[i];
 
-    gSensorQueue.push(currentReading);
+    queue.push(currentReading);
 }
 
 // Read raw data from sensor in specified intervals
@@ -51,6 +54,33 @@ void readFromSensor(void *)
         touchSensor.readI2C();
         usleep(gTaskSleepTime);
     }
+}
+
+// Read raw data from sensor in specified intervals
+void readSensorBaseline(void *)
+{
+    while (!Bela_stopRequested())
+    {
+    	gTouchSensorMutex.lock();
+		touchSensor.setMode(Trill::BASELINE);
+        std::cout << touchSensor.getMode() << std::endl;
+        touchSensor.readI2C();
+        pushSensorsToQueue(gBaselineQueue, touchSensor.rawData, 0);
+        touchSensor.setMode(Trill::RAW);
+        gTouchSensorMutex.unlock();
+        usleep(1000000);
+    }
+}
+
+void generateMessage(std::string& message, const LogEntry& entry)
+{
+	for (unsigned int i = 0; i < NUM_CAP_CHANNELS; i++)
+    {
+        message += std::to_string(entry.gSensorReading[i]);
+        if (i < NUM_CAP_CHANNELS - 1)
+            message += ",";
+    }
+    message += "]}";
 }
 
 /* Function for sending all entries accumulated in the sensor queue to the UDP socket defined in setup().
@@ -65,16 +95,20 @@ void sendSensorQueue(void *)
             LogEntry entry = gSensorQueue.pop();
             std::string message = "{\"shoe_data\":[";
             message += std::to_string(entry.timestamp) + ",";
-            for (unsigned int i = 0; i < NUM_CAP_CHANNELS; i++)
-            {
-                message += std::to_string(entry.gSensorReading[i]);
-                if (i < NUM_CAP_CHANNELS - 1)
-                    message += ",";
-            }
-            message += "]}";
+            generateMessage(message, entry);
+            // std::cout << message << std::endl;
             sendto(sock, message.c_str(), message.size(), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
         }
-        usleep(100000);
+        while (!gBaselineQueue.empty())
+        {
+            LogEntry entry = gBaselineQueue.pop();
+            std::string message = "{\"shoe_baseline\":[";
+            generateMessage(message, entry);
+            std::cout << message << std::endl;
+            sendto(sock, message.c_str(), message.size(), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
+        }
+        std::cout << "Sent the queue!" << std::endl;
+        usleep(1000000);
     }
 }
 
@@ -90,10 +124,14 @@ bool setup(BelaContext *context, void *userData)
     touchSensor.setMode(Trill::RAW);
     touchSensor.setScanSettings(2, 13); // 2 = normal update speed, 13 bit resolution -> 1400us scan time
     touchSensor.setPrescaler(3);
+    
+    usleep(1000);
+    touchSensor.updateBaseline();
 
     // Start all auxiliary task loops
     Bela_runAuxiliaryTask(readFromSensor);
     Bela_runAuxiliaryTask(sendSensorQueue);
+    Bela_runAuxiliaryTask(readSensorBaseline);
 
     std::cout << "audioSampleRate: " << context->audioSampleRate << ", audioFrames: " << context->audioFrames << std::endl;
     std::cout << "Logging rate: " << context->audioSampleRate/context->audioFrames << "hz" << std::endl;
@@ -121,7 +159,11 @@ bool setup(BelaContext *context, void *userData)
 void render(BelaContext *context, void *userData)
 {
     static unsigned int time = 0;
-    pushSensorsToQueue(touchSensor.rawData, time);
+    if (gTouchSensorMutex.try_lock())
+    {
+    	pushSensorsToQueue(gSensorQueue, touchSensor.rawData, time);
+    	gTouchSensorMutex.unlock();
+    }
     time += 1;
 }
 
