@@ -107,8 +107,7 @@ void sendSensorQueue(void *)
             std::cout << message << std::endl;
             sendto(sock, message.c_str(), message.size(), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
         }
-        std::cout << "Sent the queue!" << std::endl;
-        usleep(1000000);
+        usleep(10000);
     }
 }
 
