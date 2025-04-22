@@ -114,6 +114,45 @@ bool setup(BelaContext *context, void *userData)
     serverAddr.sin_port = htons(UDP_PORT);
     inet_pton(AF_INET, RECEIVER_IP, &serverAddr.sin_addr);
     std::cout << "Using server address: " << RECEIVER_IP << ":" << UDP_PORT << std::endl;
+    
+    // Configure UDP reciever for messages from python
+    const int PORT = 5005;
+    const int BUFFER_SIZE = 1024;
+    char buffer[BUFFER_SIZE];
+
+    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+        perror("socket failed");
+        return 1;
+    }
+
+    sockaddr_in pythonAddr{};
+    pythonAddr.sin_family = AF_INET;
+    pythonAddr.sin_port = htons(PORT);
+    pythonAddr.sin_addr.s_addr = INADDR_ANY;
+
+    if (bind(sockfd, (struct sockaddr*)&pythonAddr, sizeof(pythonAddr)) < 0) {
+        perror("bind failed");
+        close(sockfd);
+        return 1;
+    }
+
+    std::cout << "Waiting for UDP message on port " << PORT << "...\n";
+    sockaddr_in clientAddr{};
+    socklen_t addrLen = sizeof(clientAddr);
+
+    ssize_t bytesReceived = recvfrom(sockfd, buffer, BUFFER_SIZE - 1, 0,
+                                     (struct sockaddr*)&clientAddr, &addrLen);
+    if (bytesReceived < 0) {
+        perror("recvfrom failed");
+        close(sockfd);
+        return 1;
+    }
+
+    buffer[bytesReceived] = '\0'; // null-terminate the string
+    std::cout << "Received: " << buffer << std::endl;
+
+    close(sockfd);
 
     return true;
 }
