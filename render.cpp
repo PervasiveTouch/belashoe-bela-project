@@ -12,7 +12,7 @@
 
 #define NUM_CAP_CHANNELS 8
 #define UDP_PORT 5700
-#define RECEIVER_IP "192.168.2.228"
+#define RECEIVER_IP "192.168.2.226"
 
 Trill touchSensor;
 uint32_t mask = 0b00000000000000000000000011111111; // enable channels 0–7
@@ -22,7 +22,7 @@ int sock;
 struct sockaddr_in serverAddr;
 
 // Time peroiods
-unsigned int gTaskSleepTime = 1400; // (in usec) -> according to scan time at normal speed and 13 bits
+unsigned int gTaskSleepTime = 3000; // time for reading from touch sensor (in usec)
 
 // Queue for sensor readings
 struct LogEntry
@@ -88,8 +88,8 @@ bool setup(BelaContext *context, void *userData)
         return false;
     }
     touchSensor.setMode(Trill::RAW);
-    touchSensor.setScanSettings(2, 13); // 2 = normal update speed, 13 bit resolution -> 1400us scan time
-    touchSensor.setPrescaler(3);
+    touchSensor.setScanSettings(1, 12); // 1 = fast update speed, 12 bit resolution -> 380us scan time
+    touchSensor.setPrescaler(2);
     touchSensor.setChannelMask(mask);	// apply channel mask
 
     // Start all auxiliary task loops
