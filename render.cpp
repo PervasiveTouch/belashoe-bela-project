@@ -12,9 +12,10 @@
 
 #define NUM_CAP_CHANNELS 8
 #define UDP_PORT 5700
-#define RECEIVER_IP "192.168.178.179"
+#define RECEIVER_IP "192.168.2.228"
 
 Trill touchSensor;
+uint32_t mask = 0b00000000000000000000000011111111; // enable channels 0–7
 
 // UDP socket variables
 int sock;
@@ -86,15 +87,17 @@ bool setup(BelaContext *context, void *userData)
         fprintf(stderr, "Unable to initialise Trill Craft\n");
         return false;
     }
-    touchSensor.printDetails();
     touchSensor.setMode(Trill::RAW);
     touchSensor.setScanSettings(2, 13); // 2 = normal update speed, 13 bit resolution -> 1400us scan time
     touchSensor.setPrescaler(3);
+    touchSensor.setChannelMask(mask);	// apply channel mask
 
     // Start all auxiliary task loops
     Bela_runAuxiliaryTask(readFromSensor);
     Bela_runAuxiliaryTask(sendSensorQueue);
 
+	touchSensor.printDetails();
+	std::cout << "Using " << touchSensor.getNumChannels() << " channels" << std::endl;
     std::cout << "audioSampleRate: " << context->audioSampleRate << ", audioFrames: " << context->audioFrames << std::endl;
     std::cout << "Logging rate: " << context->audioSampleRate/context->audioFrames << "hz" << std::endl;
 
