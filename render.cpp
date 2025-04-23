@@ -7,6 +7,7 @@
 #include <string>
 #include <fstream>
 #include <iostream>
+#include <mutex>
 
 #include "tsqueue.h"
 
@@ -16,6 +17,7 @@
 #define RECEIVER_IP "192.168.2.228"
 
 Trill touchSensor;
+std::mutex gTouchSensorMutex;
 uint32_t mask = 0b00000000000000000000000011111111; // enable channels 0–7
 
 // UDP socket variables
@@ -47,8 +49,8 @@ void pushSensorsToQueue(std::vector<float> input, unsigned int timestamp)
 
 void sendBaseline()
 {
+	gTouchSensorMutex.lock();
 	touchSensor.setMode(Trill::BASELINE);
-    std::cout << touchSensor.getMode() << std::endl;
     touchSensor.readI2C();
     std::string message = "{\"shoe_baseline\":[";
     for (unsigned int i = 0; i < NUM_CAP_CHANNELS; i++)
@@ -58,9 +60,9 @@ void sendBaseline()
             message += ",";
     }
     message += "]}";
-    std::cout << "sent basline: " << message << std::endl;
     sendto(sock, message.c_str(), message.size(), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
     touchSensor.setMode(Trill::RAW);
+    gTouchSensorMutex.unlock();
 }
 
 // Read raw data from sensor in specified intervals
@@ -123,7 +125,7 @@ void listenBaselineRequest(void *)
         return;
     }
 
-    std::cout << "[Bela] Listening for Baseline requests on port " << BASELINE_PORT << "...\n";
+    std::cout << "[Bela] Listening for Baseline requests on port " << BASELINE_PORT << "..." << std::endl;
 
     sockaddr_in clientAddr{};
     socklen_t addrLen = sizeof(clientAddr);
@@ -191,7 +193,11 @@ bool setup(BelaContext *context, void *userData)
 void render(BelaContext *context, void *userData)
 {
     static unsigned int time = 0;
-    pushSensorsToQueue(touchSensor.rawData, time);
+    if (gTouchSensorMutex.try_lock())
+    {
+    	pushSensorsToQueue(touchSensor.rawData, time);
+    	gTouchSensorMutex.unlock();
+    }
     time += 1;
 }
 
